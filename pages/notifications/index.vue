@@ -65,7 +65,10 @@ onMounted(async () => {
       return
     }
 
-    notifications.value = data.value?.notifications || []
+    // ✅ исправлено: безопасная установка списка
+    notifications.value = Array.isArray(data.value)
+      ? data.value
+      : data.value?.notifications || []
   } catch (err: any) {
     console.error('Ошибка при загрузке:', err.message)
   }
@@ -105,7 +108,6 @@ async function goToNotification(id: number) {
     const token = localStorage.getItem('authToken')
     if (!token) throw new Error('Нет токена')
 
-    // Отметим уведомление как прочитанное
     await fetch('/api/notifications/read', {
       method: 'POST',
       headers: {
@@ -115,15 +117,14 @@ async function goToNotification(id: number) {
       body: JSON.stringify({ ids: [id] })
     })
 
-    // Перейдём на страницу уведомления
     router.push(`/notifications/${id}`)
   } catch (err) {
     console.error('Ошибка при отметке уведомления как прочитанного:', err)
-    router.push(`/notifications/${id}`) // всё равно перейти
+    router.push(`/notifications/${id}`)
   }
 }
-
 </script>
+
 
 <style scoped>
 .notifications-page {

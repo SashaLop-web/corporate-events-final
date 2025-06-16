@@ -1,4 +1,4 @@
-import { defineEventHandler, readBody } from 'h3'
+import { defineEventHandler, readBody, createError } from 'h3'
 import jwt from 'jsonwebtoken'
 import { db } from '~/server/database/db'
 
@@ -12,22 +12,33 @@ export default defineEventHandler(async event => {
 	try {
 		const rawToken = event.headers.get('Authorization')
 		if (!rawToken?.startsWith('Bearer ')) {
-			event.res.statusCode = 401
-			throw new Error('Токен отсутствует или некорректный формат')
+			throw createError({
+				statusCode: 401,
+				statusMessage: 'Токен отсутствует или некорректный формат',
+			})
 		}
 
-		const token = rawToken.split(' ')[1]
-		const decoded = jwt.verify(
-			token,
-			process.env.JWT_SECRET || 'fallback-secret'
-		) as JwtPayload
+		let decoded: JwtPayload
+		try {
+			decoded = jwt.verify(
+				rawToken.split(' ')[1],
+				process.env.JWT_SECRET || 'fallback-secret'
+			) as JwtPayload
+		} catch {
+			throw createError({
+				statusCode: 401,
+				statusMessage: 'Невалидный токен',
+			})
+		}
 
 		const body = await readBody(event)
 		const { id, status } = body
 
 		if (!id || !['accepted', 'declined'].includes(status)) {
-			event.res.statusCode = 400
-			throw new Error('Некорректные данные запроса')
+			throw createError({
+				statusCode: 400,
+				statusMessage: 'Некорректные данные запроса',
+			})
 		}
 
 		const updated = await db('notifications')
@@ -38,15 +49,18 @@ export default defineEventHandler(async event => {
 			})
 
 		if (updated === 0) {
-			event.res.statusCode = 404
-			throw new Error('Уведомление не найдено или недоступно для пользователя')
+			throw createError({
+				statusCode: 404,
+				statusMessage: 'Уведомление не найдено или недоступно для пользователя',
+			})
 		}
 
 		return { status: 'success', message: 'Ответ сохранён' }
 	} catch (e: any) {
-		return {
-			status: 'error',
-			message: e.message || 'Ошибка при сохранении ответа',
-		}
+		console.error('Ошибка при сохранении ответа:', e.message)
+		throw createError({
+			statusCode: 500,
+			statusMessage: e.message || 'Ошибка при сохранении ответа',
+		})
 	}
 })

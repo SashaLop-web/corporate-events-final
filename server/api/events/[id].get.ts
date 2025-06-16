@@ -1,4 +1,4 @@
-import { defineEventHandler, getRouterParam } from 'h3'
+import { defineEventHandler, getRouterParam, createError } from 'h3'
 import { db } from '~/server/database/db'
 import jwt from 'jsonwebtoken'
 
@@ -12,34 +12,52 @@ export default defineEventHandler(async event => {
 	try {
 		const rawToken = event.headers.get('Authorization')
 		if (!rawToken?.startsWith('Bearer ')) {
-			event.res.statusCode = 401
-			throw new Error('Токен отсутствует или некорректный формат')
+			throw createError({
+				statusCode: 401,
+				statusMessage: 'Токен отсутствует или некорректный формат',
+			})
 		}
 
 		const token = rawToken.split(' ')[1]
-		const decoded = jwt.verify(
-			token,
-			process.env.JWT_SECRET || 'fallback-secret'
-		) as JwtPayload
+		let decoded: JwtPayload
+		try {
+			decoded = jwt.verify(
+				token,
+				process.env.JWT_SECRET || 'fallback-secret'
+			) as JwtPayload
+		} catch {
+			throw createError({ statusCode: 401, statusMessage: 'Невалидный токен' })
+		}
 
-		const id = Number(getRouterParam(event, 'id'))
+		const idParam = getRouterParam(event, 'id')
+		if (!idParam) {
+			throw createError({ statusCode: 400, statusMessage: 'ID не передан' })
+		}
+		const id = Number(idParam)
 		if (isNaN(id)) {
-			event.res.statusCode = 400
-			throw new Error('Некорректный ID мероприятия')
+			throw createError({
+				statusCode: 400,
+				statusMessage: 'Некорректный ID мероприятия',
+			})
 		}
 
 		const eventData = await db('events').where('id', id).first()
 		if (!eventData) {
-			event.res.statusCode = 404
-			throw new Error('Мероприятие не найдено')
+			throw createError({
+				statusCode: 404,
+				statusMessage: 'Мероприятие не найдено',
+			})
 		}
 
+		// 🔒 Если нужно временно отключить проверку прав — закомментируй
 		if (decoded.role !== 'admin' && eventData.organizer_id !== decoded.id) {
-			event.res.statusCode = 403
-			throw new Error('Недостаточно прав для просмотра')
+			throw createError({
+				statusCode: 403,
+				statusMessage: 'Недостаточно прав для просмотра',
+			})
 		}
 
-		// Получаем участников вместе с названием отдела
+		// Получение участников мероприятия
 		const participants = await db('notifications')
 			.join('users', 'notifications.user_id', 'users.id')
 			.leftJoin('departments', 'users.department_id', 'departments.id')
@@ -53,15 +71,20 @@ export default defineEventHandler(async event => {
 				'notifications.response_status'
 			)
 
+		console.log(
+			`🔍 Найдено участников: ${participants.length} для event_id = ${id}`
+		)
+
 		return {
 			status: 'success',
 			event: eventData,
 			participants,
 		}
 	} catch (e: any) {
-		return {
-			status: 'error',
-			message: e.message || 'Ошибка при получении мероприятия',
-		}
+		console.error('Ошибка получения мероприятия:', e.message)
+		throw createError({
+			statusCode: 500,
+			statusMessage: e.message || 'Ошибка при получении мероприятия',
+		})
 	}
 })

@@ -1,4 +1,4 @@
-import { defineEventHandler, getRouterParam } from 'h3'
+import { defineEventHandler, getRouterParam, createError } from 'h3'
 import { db } from '~/server/database/db'
 import jwt from 'jsonwebtoken'
 
@@ -11,32 +11,50 @@ export default defineEventHandler(async event => {
 	try {
 		const rawToken = event.headers.get('Authorization')
 		if (!rawToken?.startsWith('Bearer ')) {
-			event.res.statusCode = 401
-			throw new Error('Нет токена')
+			throw createError({ statusCode: 401, statusMessage: 'Нет токена' })
 		}
 
-		const token = rawToken.split(' ')[1]
-		const decoded = jwt.verify(
-			token,
-			process.env.JWT_SECRET || 'secret'
-		) as JwtPayload
+		let decoded: JwtPayload
+		try {
+			decoded = jwt.verify(
+				rawToken.split(' ')[1],
+				process.env.JWT_SECRET || 'secret'
+			) as JwtPayload
+		} catch {
+			throw createError({
+				statusCode: 401,
+				statusMessage: 'Недопустимый токен',
+			})
+		}
 
 		const id = Number(getRouterParam(event, 'id'))
-		if (isNaN(id)) throw new Error('Неверный ID')
+		if (isNaN(id)) {
+			throw createError({ statusCode: 400, statusMessage: 'Неверный ID' })
+		}
 
 		const existing = await db('news').where('id', id).first()
-		if (!existing) throw new Error('Новость не найдена')
+		if (!existing) {
+			throw createError({
+				statusCode: 404,
+				statusMessage: 'Новость не найдена',
+			})
+		}
 
-		// Только автор или админ
 		if (decoded.role !== 'admin' && existing.author_id !== decoded.id) {
-			event.res.statusCode = 403
-			throw new Error('Нет прав на удаление')
+			throw createError({
+				statusCode: 403,
+				statusMessage: 'Нет прав на удаление',
+			})
 		}
 
 		await db('news').where('id', id).delete()
 
 		return { status: 'success', message: 'Новость удалена' }
 	} catch (e: any) {
-		return { status: 'error', message: e.message || 'Ошибка удаления' }
+		console.error('Ошибка удаления новости:', e.message)
+		throw createError({
+			statusCode: 500,
+			statusMessage: e.message || 'Ошибка сервера',
+		})
 	}
 })

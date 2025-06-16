@@ -1,6 +1,6 @@
 import { defineEventHandler } from 'h3'
 import jwt from 'jsonwebtoken'
-import { db } from '~/server/database/db' // ✅ заменили getDB на db
+import { db } from '~/server/database/db'
 import { IncomingForm } from 'formidable'
 import fs from 'fs'
 import path from 'path'
@@ -25,7 +25,7 @@ const MAX_FILE_SIZE = 5 * 1024 * 1024 // 5MB
 export default defineEventHandler(async event => {
 	try {
 		const rawToken = event.headers.get('Authorization')
-		if (!rawToken || !rawToken.startsWith('Bearer ')) {
+		if (!rawToken?.startsWith('Bearer ')) {
 			throw new Error('Токен не предоставлен или имеет неверный формат')
 		}
 
@@ -42,7 +42,7 @@ export default defineEventHandler(async event => {
 		const form = new IncomingForm({
 			uploadDir,
 			multiples: false,
-			keepExtensions: false,
+			keepExtensions: true,
 		})
 
 		const [fields, files] = await new Promise<
@@ -67,11 +67,13 @@ export default defineEventHandler(async event => {
 		}
 
 		let image_url: string | null = null
-		const file = files.image?.[0]
 
-		if (file) {
-			if (file.size > MAX_FILE_SIZE)
+		if (files.image) {
+			const file = Array.isArray(files.image) ? files.image[0] : files.image
+
+			if (file.size > MAX_FILE_SIZE) {
 				throw new Error('Размер файла превышает 5MB')
+			}
 
 			const mime = file.mimetype || file.type
 			let extension = ''
@@ -87,14 +89,18 @@ export default defineEventHandler(async event => {
 			image_url = `/uploads/${fileName}`
 		}
 
-		const [newsId] = await db('news').insert({
-			title,
-			content,
-			event_id: event_id || null,
-			image_url,
-			author_id: decoded.id,
-			published_at: new Date().toISOString(),
-		})
+		const [inserted] = await db('news')
+			.insert({
+				title,
+				content,
+				event_id: event_id || null,
+				image_url,
+				author_id: decoded.id,
+				published_at: new Date().toISOString(),
+			})
+			.returning('id')
+
+		const newsId = inserted?.id || inserted
 
 		return {
 			status: 'success',

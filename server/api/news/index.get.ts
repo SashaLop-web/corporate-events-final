@@ -1,7 +1,7 @@
-import { defineEventHandler } from 'h3'
+import { defineEventHandler, createError } from 'h3'
 import { db } from '~/server/database/db'
 
-export default defineEventHandler(async event => {
+export default defineEventHandler(async () => {
 	try {
 		const news = await db('news')
 			.select(
@@ -21,10 +21,9 @@ export default defineEventHandler(async event => {
 		}
 	} catch (error: any) {
 		console.error('Ошибка получения новостей:', error.message)
-		event.res.statusCode = 500
-		return {
-			status: 'error',
-			message: error.message || 'Ошибка сервера при получении новостей',
-		}
+		throw createError({
+			statusCode: 500,
+			statusMessage: error.message || 'Ошибка сервера при получении новостей',
+		})
 	}
 })

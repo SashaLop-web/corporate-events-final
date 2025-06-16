@@ -1,26 +1,22 @@
-import { defineEventHandler } from 'h3'
+import { defineEventHandler, getRouterParam, createError } from 'h3'
 import { db } from '~/server/database/db'
 
 export default defineEventHandler(async event => {
 	try {
-		const rawId = event.context.params?.id
-
+		const rawId = getRouterParam(event, 'id')
 		if (!rawId) {
-			event.res.statusCode = 400
-			return {
-				status: 'error',
-				message: 'ID новости не указан',
-			}
+			throw createError({
+				statusCode: 400,
+				statusMessage: 'ID новости не указан',
+			})
 		}
 
-		const id = parseInt(rawId)
-
+		const id = Number(rawId)
 		if (isNaN(id)) {
-			event.res.statusCode = 400
-			return {
-				status: 'error',
-				message: 'ID должен быть числом',
-			}
+			throw createError({
+				statusCode: 400,
+				statusMessage: 'ID должен быть числом',
+			})
 		}
 
 		const newsItem = await db('news')
@@ -44,11 +40,10 @@ export default defineEventHandler(async event => {
 			.first()
 
 		if (!newsItem) {
-			event.res.statusCode = 404
-			return {
-				status: 'error',
-				message: 'Новость не найдена',
-			}
+			throw createError({
+				statusCode: 404,
+				statusMessage: 'Новость не найдена',
+			})
 		}
 
 		return {
@@ -57,10 +52,9 @@ export default defineEventHandler(async event => {
 		}
 	} catch (error: any) {
 		console.error('Ошибка получения новости:', error.message)
-		event.res.statusCode = 500
-		return {
-			status: 'error',
-			message: error.message || 'Ошибка сервера',
-		}
+		throw createError({
+			statusCode: 500,
+			statusMessage: error.message || 'Ошибка сервера',
+		})
 	}
 })

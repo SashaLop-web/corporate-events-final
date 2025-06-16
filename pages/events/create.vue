@@ -154,21 +154,33 @@ onMounted(async () => {
 
   try {
     const [userRes, deptRes] = await Promise.all([
-      useFetch<{ users: User[] }>('/api/users', {
+      useFetch<{ users: User[] } | User[]>('/api/users', {
         headers: { Authorization: `Bearer ${token}` }
       }),
-      useFetch<{ departments: Department[] }>('/api/departments', {
+      useFetch<{ departments: Department[] } | Department[]>('/api/departments', {
         headers: { Authorization: `Bearer ${token}` }
       })
     ])
 
-    users.value = userRes.data.value?.users || []
-    departments.value = deptRes.data.value?.departments || []
+    const rawUsers = userRes.data.value
+    users.value = Array.isArray(rawUsers)
+      ? rawUsers
+      : (rawUsers?.users || [])
+
+    const rawDepartments = deptRes.data.value
+    departments.value = Array.isArray(rawDepartments)
+      ? rawDepartments
+      : (rawDepartments?.departments || [])
+
+    console.log('users:', users.value)
+    console.log('departments:', departments.value)
   } catch (err: any) {
     console.error('Ошибка загрузки данных:', err.message)
     message.value = { type: 'error', text: 'Ошибка загрузки данных' }
   }
 })
+
+
 
 async function createEvent() {
   try {
@@ -191,6 +203,10 @@ async function createEvent() {
       throw new Error(error.value.data?.message || 'Ошибка создания мероприятия')
     }
 
+    if (!data.value || data.value.status !== 'success') {
+      throw new Error(data.value?.message || 'Неизвестная ошибка')
+    }
+
     const user = JSON.parse(localStorage.getItem('user') || '{}')
     const redirectTo = user.role === 'admin' ? '/admin-dashboard' : '/manager-dashboard'
 
@@ -203,6 +219,7 @@ async function createEvent() {
     message.value = { type: 'error', text: err.message }
   }
 }
+
 </script>
 
 

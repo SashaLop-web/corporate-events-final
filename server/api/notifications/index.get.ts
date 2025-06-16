@@ -1,4 +1,4 @@
-import { defineEventHandler } from 'h3'
+import { defineEventHandler, createError } from 'h3'
 import jwt from 'jsonwebtoken'
 import { db } from '~/server/database/db'
 
@@ -12,13 +12,18 @@ export default defineEventHandler(async event => {
 	try {
 		const rawToken = event.headers.get('Authorization')
 		if (!rawToken?.startsWith('Bearer ')) {
-			throw new Error('Токен отсутствует')
+			throw createError({ statusCode: 401, statusMessage: 'Токен отсутствует' })
 		}
 
-		const decoded = jwt.verify(
-			rawToken.split(' ')[1],
-			process.env.JWT_SECRET || 'fallback-secret'
-		) as JwtPayload
+		let decoded: JwtPayload
+		try {
+			decoded = jwt.verify(
+				rawToken.split(' ')[1],
+				process.env.JWT_SECRET || 'fallback-secret'
+			) as JwtPayload
+		} catch {
+			throw createError({ statusCode: 401, statusMessage: 'Невалидный токен' })
+		}
 
 		const notifications = await db('notifications')
 			.leftJoin('events', 'notifications.event_id', 'events.id')
@@ -40,10 +45,10 @@ export default defineEventHandler(async event => {
 
 		return { status: 'success', notifications }
 	} catch (error: any) {
-		event.res.statusCode = 401
-		return {
-			status: 'error',
-			message: error.message || 'Ошибка получения уведомлений',
-		}
+		console.error('Ошибка получения уведомлений:', error.message)
+		throw createError({
+			statusCode: 500,
+			statusMessage: error.message || 'Ошибка получения уведомлений',
+		})
 	}
 })

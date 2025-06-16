@@ -1,4 +1,4 @@
-import { defineEventHandler, readBody } from 'h3'
+import { defineEventHandler, readBody, createError } from 'h3'
 import jwt from 'jsonwebtoken'
 import { db } from '~/server/database/db'
 
@@ -10,20 +10,28 @@ interface JwtPayload {
 
 export default defineEventHandler(async event => {
 	try {
+		// Авторизация
 		const rawToken = event.headers.get('Authorization')
-		if (!rawToken || !rawToken.startsWith('Bearer ')) {
-			throw new Error('Некорректный или отсутствующий токен')
+		if (!rawToken?.startsWith('Bearer ')) {
+			throw createError({ statusCode: 401, statusMessage: 'Нет токена' })
 		}
 
-		const decoded = jwt.verify(
-			rawToken.split(' ')[1],
-			process.env.JWT_SECRET || 'fallback-secret'
-		) as JwtPayload
+		let decoded: JwtPayload
+		try {
+			decoded = jwt.verify(
+				rawToken.split(' ')[1],
+				process.env.JWT_SECRET || 'fallback-secret'
+			) as JwtPayload
+		} catch {
+			throw createError({ statusCode: 401, statusMessage: 'Невалидный токен' })
+		}
 
 		const body = await readBody(event)
-
 		if (!body || typeof body !== 'object') {
-			throw new Error('Пустое или некорректное тело запроса')
+			throw createError({
+				statusCode: 400,
+				statusMessage: 'Неверное тело запроса',
+			})
 		}
 
 		const {
@@ -40,10 +48,11 @@ export default defineEventHandler(async event => {
 		} = body
 
 		if (!title || !event_date) {
-			throw new Error('Недостаточно данных для создания мероприятия')
+			throw createError({ statusCode: 400, statusMessage: 'Не хватает данных' })
 		}
 
-		const [eventId] = await db('events').insert({
+		// Вставка мероприятия
+		const insertData = {
 			title,
 			type: type || 'meeting',
 			description: description || null,
@@ -52,21 +61,29 @@ export default defineEventHandler(async event => {
 			location_comment: location_comment || null,
 			event_date,
 			is_announced: is_announced || false,
-		})
+		}
+
+		await db('events').insert(insertData)
+
+		// Получаем последний ID (только для SQLite)
+		const [{ id: eventId }] = await db('events').orderBy('id', 'desc').limit(1)
+
+		console.log('📌 Мероприятие создано, id =', eventId)
 
 		const invitedUserIds = new Set<number>()
 
-		// === Приглашения для индивидуальной встречи ===
+		// === Индивидуальные встречи ===
 		if (type === 'meeting_individual') {
-			if (!Array.isArray(participants) || participants.length === 0) {
-				throw new Error(
-					'Для индивидуальной встречи необходимо указать участников'
-				)
-			}
+			const validParticipants = Array.isArray(participants)
+				? participants.map(Number).filter(id => Number.isInteger(id))
+				: []
 
-			const validParticipants = participants
-				.map((id: any) => Number(id))
-				.filter((id: number) => !isNaN(id))
+			if (validParticipants.length === 0) {
+				throw createError({
+					statusCode: 400,
+					statusMessage: 'Нужно указать участников для индивидуальной встречи',
+				})
+			}
 
 			for (const userId of validParticipants) {
 				invitedUserIds.add(userId)
@@ -76,7 +93,6 @@ export default defineEventHandler(async event => {
 					status: 'pending',
 					comment: null,
 				})
-
 				await db('notifications').insert({
 					user_id: userId,
 					event_id: eventId,
@@ -89,26 +105,25 @@ export default defineEventHandler(async event => {
 			}
 		}
 
-		// === Приглашения для встречи по отделу ===
+		// === Встреча по отделу ===
 		if (type === 'meeting_department') {
 			if (!department_id) {
-				throw new Error('Для встречи с отделом необходимо выбрать отдел')
+				throw createError({
+					statusCode: 400,
+					statusMessage: 'Не выбран отдел',
+				})
 			}
 
-			const deptUsers = await db('users')
-				.select('id')
-				.where({ department_id: department_id })
+			const deptUsers = await db('users').select('id').where({ department_id })
 
 			for (const { id } of deptUsers) {
 				invitedUserIds.add(id)
-
 				await db('invitations').insert({
 					event_id: eventId,
 					user_id: id,
 					status: 'pending',
 					comment: null,
 				})
-
 				await db('notifications').insert({
 					user_id: id,
 					event_id: eventId,
@@ -121,7 +136,7 @@ export default defineEventHandler(async event => {
 			}
 		}
 
-		// === Оповещение всех сотрудников ===
+		// === Рассылка всем сотрудникам ===
 		if (
 			notifyAll &&
 			!['meeting_individual', 'meeting_department'].includes(type)
@@ -145,17 +160,18 @@ export default defineEventHandler(async event => {
 			}
 		}
 
+		console.log('✅ Уведомления успешно добавлены')
+
 		return {
 			status: 'success',
 			message: 'Мероприятие успешно создано',
 			eventId,
 		}
 	} catch (error: any) {
-		console.error('Ошибка создания мероприятия:', error.message)
-		event.res.statusCode = 400
-		return {
-			status: 'error',
-			message: error.message || 'Ошибка сервера',
-		}
+		console.error('❌ Ошибка создания мероприятия:', error)
+		throw createError({
+			statusCode: 500,
+			statusMessage: error.message || 'Ошибка сервера',
+		})
 	}
 })

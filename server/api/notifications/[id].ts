@@ -1,4 +1,4 @@
-import { defineEventHandler, getRouterParam } from 'h3'
+import { defineEventHandler, getRouterParam, createError } from 'h3'
 import jwt from 'jsonwebtoken'
 import { db } from '~/server/database/db'
 
@@ -12,27 +12,34 @@ export default defineEventHandler(async event => {
 	try {
 		const rawToken = event.headers.get('Authorization')
 		if (!rawToken?.startsWith('Bearer ')) {
-			event.res.statusCode = 401
-			throw new Error('Токен отсутствует или некорректный формат')
+			throw createError({
+				statusCode: 401,
+				statusMessage: 'Токен отсутствует или некорректный формат',
+			})
 		}
 
-		const token = rawToken.split(' ')[1]
-		const decoded = jwt.verify(
-			token,
-			process.env.JWT_SECRET || 'fallback-secret'
-		) as JwtPayload
+		let decoded: JwtPayload
+		try {
+			decoded = jwt.verify(
+				rawToken.split(' ')[1],
+				process.env.JWT_SECRET || 'fallback-secret'
+			) as JwtPayload
+		} catch {
+			throw createError({ statusCode: 401, statusMessage: 'Невалидный токен' })
+		}
 
 		const id = Number(getRouterParam(event, 'id'))
 		if (isNaN(id)) {
-			event.res.statusCode = 400
-			throw new Error('Некорректный ID уведомления')
+			throw createError({
+				statusCode: 400,
+				statusMessage: 'Некорректный ID уведомления',
+			})
 		}
 
 		const notification = await db('notifications')
 			.leftJoin('events', 'notifications.event_id', 'events.id')
 			.where('notifications.user_id', decoded.id)
 			.andWhere('notifications.id', id)
-			.first()
 			.select(
 				'notifications.id',
 				'notifications.message',
@@ -46,18 +53,24 @@ export default defineEventHandler(async event => {
 				'events.location',
 				'events.location_comment'
 			)
-			  
+			.first()
 
 		if (!notification) {
-			event.res.statusCode = 404
-			throw new Error('Уведомление не найдено')
+			throw createError({
+				statusCode: 404,
+				statusMessage: 'Уведомление не найдено',
+			})
 		}
 
-		return { status: 'success', notification }
-	} catch (e: any) {
 		return {
-			status: 'error',
-			message: e.message || 'Ошибка получения уведомления',
+			status: 'success',
+			notification,
 		}
+	} catch (e: any) {
+		console.error('Ошибка получения уведомления:', e.message)
+		throw createError({
+			statusCode: 500,
+			statusMessage: e.message || 'Ошибка получения уведомления',
+		})
 	}
 })
