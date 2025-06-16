@@ -11,13 +11,15 @@ export default defineNuxtConfig({
 		},
 	},
 
-	modules: ['@pinia/nuxt'],
-	plugins: ['~/plugins/auth.ts'],
-
 	nitro: {
 		preset: 'node-server',
+		port: parseInt(process.env.PORT || '3000'), // 👈 ВАЖНО!
+		host: '0.0.0.0',
 		compatibilityDate: '2025-06-16',
 	},
+
+	modules: ['@pinia/nuxt'],
+	plugins: ['~/plugins/auth.ts'],
 
 	devtools: {
 		enabled: true,

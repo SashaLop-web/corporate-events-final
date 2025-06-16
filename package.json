@@ -6,9 +6,7 @@
 		"dev": "nuxt dev",
 		"build": "nuxt build",
 		"start": "node .output/server/index.mjs",
-		"postinstall": "nuxt prepare",
-		"build-and-start": "nuxt build && node .output/server/index.mjs"
-
+		"postinstall": "nuxt prepare"
 	},
 	"dependencies": {
 		"@pinia/nuxt": "^0.11.0",
