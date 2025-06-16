@@ -1,7 +1,7 @@
 import { defineNuxtPlugin } from '#app'
 import { useUserStore } from '~/stores/user'
 
-interface VerifyResponse {
+interface VerifyTokenResponse {
 	status: string
 	user: {
 		id: number
@@ -9,6 +9,10 @@ interface VerifyResponse {
 		full_name: string
 		role: string
 	}
+}
+
+interface RefreshTokenResponse {
+	token: string
 }
 
 export default defineNuxtPlugin(async () => {
@@ -20,51 +24,56 @@ export default defineNuxtPlugin(async () => {
 
 	const verifyUser = async (tokenToVerify: string): Promise<boolean> => {
 		try {
-			const data = await $fetch<VerifyResponse>('/api/auth/verify-token', {
+			const res = await $fetch<VerifyTokenResponse>('/api/auth/verify-token', {
 				method: 'POST',
 				body: { token: tokenToVerify },
-				headers: { 'Content-Type': 'application/json' },
+				headers: {
+					'Content-Type': 'application/json',
+				},
 			})
 
-			if (data?.user) {
-				userStore.setUser(data.user)
+			if (res && res.user) {
+				userStore.setUser(res.user)
 				return true
 			}
 		} catch (err) {
-			console.warn('Ошибка проверки токена:', err)
+			console.warn('Ошибка при проверке токена:', err)
 		}
 		return false
 	}
 
-	const tryRefreshToken = async (): Promise<boolean> => {
+	const tryRefresh = async (): Promise<boolean> => {
 		try {
-			const refreshRes = await $fetch<{ token: string }>(
+			const res = await $fetch<RefreshTokenResponse>(
 				'/api/auth/refresh-token',
 				{
 					method: 'POST',
 					body: { refreshToken },
-					headers: { 'Content-Type': 'application/json' },
+					headers: {
+						'Content-Type': 'application/json',
+					},
 				}
 			)
 
-			const newToken = refreshRes?.token
-			if (newToken) {
-				localStorage.setItem('authToken', newToken)
-				return await verifyUser(newToken)
+			if (res && res.token) {
+				localStorage.setItem('authToken', res.token)
+				return await verifyUser(res.token)
 			}
 		} catch (err) {
-			console.error('Ошибка обновления токена:', err)
+			console.warn('Ошибка при обновлении токена:', err)
 		}
 		return false
 	}
 
-	const valid = token ? await verifyUser(token) : false
-	if (!valid && refreshToken) {
-		const refreshed = await tryRefreshToken()
-		if (!refreshed) {
-			userStore.clearUser()
-			localStorage.removeItem('authToken')
-			localStorage.removeItem('refreshToken')
+	if (token) {
+		const success = await verifyUser(token)
+		if (!success && refreshToken) {
+			const refreshed = await tryRefresh()
+			if (!refreshed) {
+				userStore.clearUser()
+				localStorage.removeItem('authToken')
+				localStorage.removeItem('refreshToken')
+			}
 		}
 	}
 })
